@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Retro Pong</title>
+	<script src="./gamepad.js"></script>
+	<style>
+		:root {
+			--bg: #111;
+			--panel: #1e1e1e;
+			--fg: #f2f2f2;
+			--accent: #3ecf8e;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: grid;
+			place-items: center;
+			background: radial-gradient(circle at 30% 20%, #242424, var(--bg));
+			color: var(--fg);
+			font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+		}
+
+		.game-wrap {
+			width: min(92vw, 860px);
+			background: linear-gradient(180deg, #262626, var(--panel));
+			border: 2px solid #444;
+			border-radius: 10px;
+			padding: 16px;
+			box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
+		}
+
+		.hud {
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			margin-bottom: 10px;
+			gap: 10px;
+			font-size: clamp(14px, 2.5vw, 18px);
+		}
+
+		.scoreboard {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			padding: 8px 14px;
+			border: 2px solid #4b4b4b;
+			border-radius: 999px;
+			background: linear-gradient(180deg, #141414, #090909);
+			box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.06);
+		}
+
+		.team-tag {
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 0.08em;
+			padding: 3px 8px;
+			border-radius: 999px;
+		}
+
+		.team-tag.player {
+			background: rgba(62, 207, 142, 0.18);
+			color: #93f0c8;
+		}
+
+		.team-tag.ai {
+			background: rgba(255, 255, 255, 0.14);
+			color: #ececec;
+		}
+
+		.score-num {
+			font-weight: 700;
+			color: var(--accent);
+			letter-spacing: 0.08em;
+			font-size: clamp(22px, 4vw, 30px);
+			line-height: 1;
+			min-width: 1.2ch;
+			text-align: center;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.score-sep {
+			color: #cfcfcf;
+			font-size: clamp(18px, 3.4vw, 24px);
+			font-weight: 700;
+		}
+
+		canvas {
+			width: 100%;
+			height: auto;
+			display: block;
+			border: 2px solid #555;
+			background: #000;
+			border-radius: 6px;
+		}
+
+		.message {
+			margin-bottom: 10px;
+			min-height: 1.2em;
+			text-align: center;
+			color: #d9f6e9;
+			font-size: clamp(12px, 2.1vw, 14px);
+			letter-spacing: 0.02em;
+		}
+	</style>
+</head>
+<body>
+	<main class="game-wrap">
+		<div class="hud">
+			<div class="scoreboard" aria-label="Scoreboard">
+				<span class="team-tag player">YOU</span>
+				<span class="score-num" id="player-score">0</span>
+				<span class="score-sep">-</span>
+				<span class="score-num" id="ai-score">0</span>
+				<span class="team-tag ai">CPU</span>
+			</div>
+		</div>
+		<div class="message" id="message"></div>
+		<canvas id="pong" width="800" height="500" aria-label="Pong Game"></canvas>
+	</main>
+
+	<script>
+		const canvas = document.getElementById("pong");
+		const ctx = canvas.getContext("2d");
+		const playerScoreEl = document.getElementById("player-score");
+		const aiScoreEl = document.getElementById("ai-score");
+		const messageEl = document.getElementById("message");
+
+		let audioCtx = null;
+
+		const game = {
+			width: canvas.width,
+			height: canvas.height,
+			paddleW: 14,
+			basePaddleH: 100,
+			playerPaddleH: 100,
+			aiPaddleH: 100,
+			playerY: (canvas.height - 100) / 2,
+			aiY: (canvas.height - 100) / 2,
+			playerSpeed: 7,
+			aiSpeed: 4.5,
+			ballSize: 12,
+			ballX: canvas.width / 2,
+			ballY: canvas.height / 2,
+			ballVX: 4.8,
+			ballVY: 2.2,
+			maxBallSpeed: 11,
+			playerScore: 0,
+			aiScore: 0,
+			upPressed: false,
+			downPressed: false,
+			flashUntil: 0,
+			shakeUntil: 0,
+			ballTrail: [],
+			particles: [],
+			powerUp: null,
+			nextPowerUpAt: performance.now() + 7000,
+			playerSizeBoostUntil: 0,
+			aiSizePenaltyUntil: 0,
+			messageText: "",
+			messageUntil: 0,
+			ballSpin: 0,
+			playerMoveY: 0,
+			aiMoveY: 0,
+			gameOver: false,
+			winner: ""
+		};
+
+		const POWER_TYPES = ["slow", "grow", "shrink"];
+		const WIN_SCORE = 7;
+		const WIN_BY = 2;
+
+		function ensureAudio() {
+			if (!audioCtx) {
+				audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+			}
+			if (audioCtx.state === "suspended") {
+				audioCtx.resume();
+			}
+		}
+
+		function playTone(freq, duration, type = "square", volume = 0.035) {
+			if (!audioCtx) {
+				return;
+			}
+			const osc = audioCtx.createOscillator();
+			const gain = audioCtx.createGain();
+			osc.type = type;
+			osc.frequency.value = freq;
+			gain.gain.value = volume;
+			osc.connect(gain);
+			gain.connect(audioCtx.destination);
+			const now = audioCtx.currentTime;
+			gain.gain.setValueAtTime(volume, now);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+			osc.start(now);
+			osc.stop(now + duration);
+		}
+
+		function clamp(value, min, max) {
+			return Math.max(min, Math.min(max, value));
+		}
+
+		function speedMagnitude() {
+			return Math.hypot(game.ballVX, game.ballVY);
+		}
+
+		function setBallSpeed(nextSpeed) {
+			const current = speedMagnitude() || 1;
+			const scale = nextSpeed / current;
+			game.ballVX *= scale;
+			game.ballVY *= scale;
+		}
+
+		function boostBallSpeed() {
+			const boosted = clamp(speedMagnitude() * 1.06, 3.5, game.maxBallSpeed);
+			setBallSpeed(boosted);
+		}
+
+		function ensureVerticalMotion(preferSign = 1, minAbs = 1.05) {
+			if (Math.abs(game.ballVY) < minAbs) {
+				const sign = game.ballVY === 0 ? preferSign : Math.sign(game.ballVY);
+				game.ballVY = minAbs * (sign || 1);
+			}
+		}
+
+		function resetBall(direction = 1) {
+			game.ballX = game.width / 2;
+			game.ballY = game.height / 2;
+			game.ballVX = 4.8 * direction;
+			game.ballVY = (Math.random() * 3.6 - 1.8) || 1.8;
+			ensureVerticalMotion(Math.random() < 0.5 ? -1 : 1, 1.1);
+			game.ballSpin = 0;
+			game.ballTrail.length = 0;
+		}
+
+		function updateScore() {
+			playerScoreEl.textContent = String(game.playerScore);
+			aiScoreEl.textContent = String(game.aiScore);
+		}
+
+		function hasWinner() {
+			const diff = Math.abs(game.playerScore - game.aiScore);
+			if (game.playerScore >= WIN_SCORE && diff >= WIN_BY) {
+				game.winner = "YOU";
+				return true;
+			}
+			if (game.aiScore >= WIN_SCORE && diff >= WIN_BY) {
+				game.winner = "CPU";
+				return true;
+			}
+			return false;
+		}
+
+		function endMatch(now) {
+			game.gameOver = true;
+			game.powerUp = null;
+			game.ballTrail.length = 0;
+			game.ballVX = 0;
+			game.ballVY = 0;
+			game.ballSpin = 0;
+			game.flashUntil = now + 350;
+			game.shakeUntil = now + 260;
+			setMessage(`${game.winner} wins ${game.playerScore}-${game.aiScore}. Press Start to restart.`);
+			playTone(game.winner === "YOU" ? 680 : 180, 0.22, "square", 0.055);
+		}
+
+		function restartMatch() {
+			game.playerScore = 0;
+			game.aiScore = 0;
+			game.playerPaddleH = game.basePaddleH;
+			game.aiPaddleH = game.basePaddleH;
+			game.playerSizeBoostUntil = 0;
+			game.aiSizePenaltyUntil = 0;
+			game.powerUp = null;
+			game.nextPowerUpAt = performance.now() + 7000;
+			game.gameOver = false;
+			game.winner = "";
+			game.playerY = (game.height - game.playerPaddleH) / 2;
+			game.aiY = (game.height - game.aiPaddleH) / 2;
+			game.upPressed = false;
+			game.downPressed = false;
+			game.playerMoveY = 0;
+			game.aiMoveY = 0;
+			updateScore();
+			resetBall(Math.random() < 0.5 ? -1 : 1);
+			setMessage("First to 7, win by 2.", performance.now() + 2200);
+		}
+
+		function setMessage(text, until = 0) {
+			game.messageText = text;
+			game.messageUntil = until;
+		}
+
+		function updateMessage(now) {
+			if (game.messageUntil && now > game.messageUntil) {
+				game.messageText = "";
+				game.messageUntil = 0;
+			}
+			messageEl.textContent = game.messageText;
+		}
+
+		function drawMiddleLine() {
+			ctx.strokeStyle = "#2e2e2e";
+			ctx.setLineDash([10, 14]);
+			ctx.beginPath();
+			ctx.moveTo(game.width / 2, 0);
+			ctx.lineTo(game.width / 2, game.height);
+			ctx.stroke();
+			ctx.setLineDash([]);
+		}
+
+		function drawArena(now) {
+			const grad = ctx.createLinearGradient(0, 0, 0, game.height);
+			grad.addColorStop(0, "#0f202b");
+			grad.addColorStop(0.5, "#10252f");
+			grad.addColorStop(1, "#0b1822");
+			ctx.fillStyle = grad;
+			ctx.fillRect(0, 0, game.width, game.height);
+
+			const shift = (now * 0.045) % 24;
+			ctx.fillStyle = "rgba(200, 240, 255, 0.06)";
+			for (let y = -24; y < game.height + 24; y += 24) {
+				ctx.fillRect(0, y + shift, game.width, 1);
+			}
+
+			ctx.fillStyle = "rgba(62, 207, 142, 0.09)";
+			ctx.beginPath();
+			ctx.arc(game.width * 0.22, game.height * 0.16, 90, 0, Math.PI * 2);
+			ctx.fill();
+
+			ctx.fillStyle = "rgba(120, 180, 255, 0.08)";
+			ctx.beginPath();
+			ctx.arc(game.width * 0.8, game.height * 0.85, 115, 0, Math.PI * 2);
+			ctx.fill();
+		}
+
+		function drawRect(x, y, w, h, color) {
+			ctx.fillStyle = color;
+			ctx.fillRect(x, y, w, h);
+		}
+
+		function drawBall() {
+			drawRect(game.ballX, game.ballY, game.ballSize, game.ballSize, "#f2f2f2");
+		}
+
+		function drawTrail() {
+			for (let i = 0; i < game.ballTrail.length; i += 1) {
+				const p = game.ballTrail[i];
+				const alpha = (i + 1) / game.ballTrail.length;
+				ctx.fillStyle = `rgba(242, 242, 242, ${alpha * 0.22})`;
+				ctx.fillRect(p.x, p.y, game.ballSize, game.ballSize);
+			}
+		}
+
+		function spawnParticles(x, y, color, count = 10) {
+			for (let i = 0; i < count; i += 1) {
+				game.particles.push({
+					x,
+					y,
+					vx: (Math.random() * 2 - 1) * 3.2,
+					vy: (Math.random() * 2 - 1) * 3.2,
+					life: 22 + Math.random() * 16,
+					color
+				});
+			}
+		}
+
+		function updateParticles() {
+			for (let i = game.particles.length - 1; i >= 0; i -= 1) {
+				const p = game.particles[i];
+				p.x += p.vx;
+				p.y += p.vy;
+				p.vx *= 0.99;
+				p.vy *= 0.99;
+				p.life -= 1;
+				if (p.life <= 0) {
+					game.particles.splice(i, 1);
+				}
+			}
+		}
+
+		function drawParticles() {
+			for (const p of game.particles) {
+				ctx.fillStyle = p.color;
+				ctx.fillRect(p.x, p.y, 3, 3);
+			}
+		}
+
+		function spawnPowerUp(now) {
+			const type = POWER_TYPES[Math.floor(Math.random() * POWER_TYPES.length)];
+			const x = 180 + Math.random() * (game.width - 360);
+			const y = 50 + Math.random() * (game.height - 100);
+			game.powerUp = { type, x, y, r: 12, expiresAt: now + 9000 };
+			setMessage(`${powerLabel(type)} spawned: hit the orb with the ball!`, now + 9000);
+		}
+
+		function powerLabel(type) {
+			if (type === "slow") return "Slow Ball";
+			if (type === "grow") return "Paddle Boost";
+			return "AI Shrink";
+		}
+
+		function powerColor(type) {
+			if (type === "slow") return "#37d67a";
+			if (type === "grow") return "#3fa9ff";
+			return "#ff6b6b";
+		}
+
+		function drawPowerUp() {
+			if (!game.powerUp) return;
+			const p = game.powerUp;
+			ctx.beginPath();
+			ctx.fillStyle = powerColor(p.type);
+			ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.strokeStyle = "rgba(255,255,255,0.5)";
+			ctx.lineWidth = 2;
+			ctx.stroke();
+		}
+
+		function applyPowerUp(type, now) {
+			if (type === "slow") {
+				const newSpeed = Math.max(3.1, speedMagnitude() * 0.78);
+				setBallSpeed(newSpeed);
+				playTone(380, 0.12, "triangle", 0.045);
+				setMessage("Slow Ball active for this rally.", now + 1600);
+			}
+			if (type === "grow") {
+				game.playerPaddleH = clamp(game.basePaddleH + 32, 80, 170);
+				game.playerSizeBoostUntil = now + 8000;
+				playTone(520, 0.09, "square", 0.045);
+				setMessage("Paddle Boost active: your paddle is bigger.", now + 1700);
+			}
+			if (type === "shrink") {
+				game.aiPaddleH = clamp(game.basePaddleH - 24, 56, 170);
+				game.aiSizePenaltyUntil = now + 8000;
+				playTone(290, 0.1, "sawtooth", 0.045);
+				setMessage("AI Shrink active: opponent paddle is smaller.", now + 1700);
+			}
+		}
+
+		function updatePowerUps(now) {
+			if (!game.powerUp && now >= game.nextPowerUpAt) {
+				spawnPowerUp(now);
+			}
+
+			if (game.powerUp && now > game.powerUp.expiresAt) {
+				game.powerUp = null;
+				game.nextPowerUpAt = now + 7000 + Math.random() * 5000;
+			}
+
+			if (now > game.playerSizeBoostUntil) {
+				game.playerPaddleH = game.basePaddleH;
+			}
+
+			if (now > game.aiSizePenaltyUntil) {
+				game.aiPaddleH = game.basePaddleH;
+			}
+
+			game.playerY = clamp(game.playerY, 0, game.height - game.playerPaddleH);
+			game.aiY = clamp(game.aiY, 0, game.height - game.aiPaddleH);
+		}
+
+		function draw(now) {
+			ctx.save();
+			if (now < game.shakeUntil) {
+				const sx = (Math.random() * 2 - 1) * 4;
+				const sy = (Math.random() * 2 - 1) * 4;
+				ctx.translate(sx, sy);
+			}
+
+			drawArena(now);
+			drawMiddleLine();
+
+			drawRect(20, game.playerY, game.paddleW, game.playerPaddleH, "#3ecf8e");
+			drawRect(game.width - 20 - game.paddleW, game.aiY, game.paddleW, game.aiPaddleH, "#f2f2f2");
+			drawTrail();
+			drawBall();
+			drawParticles();
+			drawPowerUp();
+
+			if (now < game.flashUntil) {
+				ctx.fillStyle = "rgba(255,255,255,0.09)";
+				ctx.fillRect(0, 0, game.width, game.height);
+			}
+
+			ctx.restore();
+		}
+
+		function handleInput() {
+			const prevY = game.playerY;
+			if (game.upPressed) {
+				game.playerY -= game.playerSpeed;
+			}
+			if (game.downPressed) {
+				game.playerY += game.playerSpeed;
+			}
+			game.playerY = clamp(game.playerY, 0, game.height - game.playerPaddleH);
+			game.playerMoveY = game.playerY - prevY;
+		}
+
+		function moveAI() {
+			const prevY = game.aiY;
+			const aiCenter = game.aiY + game.aiPaddleH / 2;
+			const target = game.ballY + game.ballSize / 2;
+
+			if (aiCenter < target - 8) {
+				game.aiY += game.aiSpeed;
+			} else if (aiCenter > target + 8) {
+				game.aiY -= game.aiSpeed;
+			}
+
+			game.aiY = clamp(game.aiY, 0, game.height - game.aiPaddleH);
+			game.aiMoveY = game.aiY - prevY;
+		}
+
+		function ballHitsPaddle(paddleX, paddleY, paddleH) {
+			return (
+				game.ballX < paddleX + game.paddleW &&
+				game.ballX + game.ballSize > paddleX &&
+				game.ballY < paddleY + paddleH &&
+				game.ballY + game.ballSize > paddleY
+			);
+		}
+
+		function handlePaddleBounce(paddleY, paddleH, direction, paddleMoveY, now) {
+			const ballCenter = game.ballY + game.ballSize / 2;
+			const paddleCenter = paddleY + paddleH / 2;
+			const impact = clamp((ballCenter - paddleCenter) / (paddleH / 2), -1, 1);
+
+			game.ballVX = Math.abs(game.ballVX) * direction;
+			game.ballVY += impact * 3.2;
+
+			if (Math.abs(paddleMoveY) > 0.15) {
+				game.ballSpin = clamp(game.ballSpin + paddleMoveY * 0.6, -7.5, 7.5);
+				game.ballVY += paddleMoveY * 0.45;
+			}
+
+			ensureVerticalMotion(impact >= 0 ? 1 : -1, 1.2);
+			boostBallSpeed();
+			game.flashUntil = now + 70;
+			playTone(780 - Math.abs(impact) * 200, 0.04, "square", 0.03);
+			spawnParticles(game.ballX + game.ballSize / 2, game.ballY + game.ballSize / 2, "#f2f2f2", 9);
+		}
+
+		function ballHitsPowerUp() {
+			if (!game.powerUp) {
+				return false;
+			}
+			const p = game.powerUp;
+			const cx = game.ballX + game.ballSize / 2;
+			const cy = game.ballY + game.ballSize / 2;
+			const dx = cx - p.x;
+			const dy = cy - p.y;
+			return (dx * dx + dy * dy) <= (p.r + game.ballSize * 0.6) * (p.r + game.ballSize * 0.6);
+		}
+
+		function updateBall(now) {
+			if (Math.abs(game.ballSpin) > 0.02) {
+				game.ballVY += game.ballSpin * 0.08;
+				game.ballSpin *= 0.985;
+			}
+
+			game.ballX += game.ballVX;
+			game.ballY += game.ballVY;
+			game.ballTrail.push({ x: game.ballX, y: game.ballY });
+			if (game.ballTrail.length > 7) {
+				game.ballTrail.shift();
+			}
+
+			if (game.ballY <= 0 || game.ballY + game.ballSize >= game.height) {
+				if (game.ballY <= 0) {
+					game.ballY = 0;
+				}
+				if (game.ballY + game.ballSize >= game.height) {
+					game.ballY = game.height - game.ballSize;
+				}
+				game.ballVY *= -1;
+				game.ballSpin *= 0.55;
+				ensureVerticalMotion(game.ballY <= 0 ? 1 : -1, 1.0);
+				playTone(220, 0.025, "triangle", 0.02);
+			}
+
+			const playerPaddleX = 20;
+			const aiPaddleX = game.width - 20 - game.paddleW;
+
+			if (ballHitsPaddle(playerPaddleX, game.playerY, game.playerPaddleH) && game.ballVX < 0) {
+				handlePaddleBounce(game.playerY, game.playerPaddleH, 1, game.playerMoveY, now);
+			}
+
+			if (ballHitsPaddle(aiPaddleX, game.aiY, game.aiPaddleH) && game.ballVX > 0) {
+				handlePaddleBounce(game.aiY, game.aiPaddleH, -1, game.aiMoveY, now);
+			}
+
+			if (ballHitsPowerUp()) {
+				applyPowerUp(game.powerUp.type, now);
+				spawnParticles(game.powerUp.x, game.powerUp.y, powerColor(game.powerUp.type), 14);
+				game.powerUp = null;
+				game.nextPowerUpAt = now + 7000 + Math.random() * 5000;
+			}
+
+			if (game.ballX + game.ballSize < 0) {
+				game.aiScore += 1;
+				updateScore();
+				game.shakeUntil = now + 220;
+				playTone(170, 0.2, "sawtooth", 0.055);
+				spawnParticles(game.ballX, game.ballY, "#ff6b6b", 16);
+				if (hasWinner()) {
+					endMatch(now);
+				} else {
+					resetBall(1);
+				}
+			}
+
+			if (game.ballX > game.width) {
+				game.playerScore += 1;
+				updateScore();
+				game.shakeUntil = now + 220;
+				playTone(520, 0.15, "square", 0.05);
+				spawnParticles(game.ballX, game.ballY, "#3ecf8e", 16);
+				if (hasWinner()) {
+					endMatch(now);
+				} else {
+					resetBall(-1);
+				}
+			}
+		}
+
+		function loop(now) {
+			if (!game.gameOver) {
+				handleInput();
+				moveAI();
+				updatePowerUps(now);
+				updateBall(now);
+			}
+			updateParticles();
+			updateMessage(now);
+			draw(now);
+			requestAnimationFrame(loop);
+		}
+
+		document.addEventListener("keydown", (event) => {
+			ensureAudio();
+			if (event.code === "Space" && game.gameOver) {
+				restartMatch();
+				event.preventDefault();
+			}
+			if (event.code === "ArrowUp") {
+				game.upPressed = true;
+				event.preventDefault();
+			}
+			if (event.code === "ArrowDown") {
+				game.downPressed = true;
+				event.preventDefault();
+			}
+		});
+
+		document.addEventListener("keyup", (event) => {
+			if (event.code === "ArrowUp") {
+				game.upPressed = false;
+			}
+			if (event.code === "ArrowDown") {
+				game.downPressed = false;
+			}
+		});
+
+		updateScore();
+		setMessage("First to 7, win by 2.", performance.now() + 2200);
+		requestAnimationFrame(loop);
+	</script>
+</body>
+</html>

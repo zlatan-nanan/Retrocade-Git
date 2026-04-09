@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<gameList>
+	<game>
+		<path>./Astro Arcade/Retrocade V1.html</path>
+		<name>Retrocade V1</name>
+		<playcount>1</playcount>
+		<lastplayed>20260407T092539</lastplayed>
+	</game>
+	<game>
+		<path>./pong/index.html</path>
+		<name>index</name>
+		<playcount>1</playcount>
+		<lastplayed>20260407T092336</lastplayed>
+	</game>
+	<game>
+		<path>./RetrocadeDash/index.html</path>
+		<name>RetrocadeDash</name>
+		<favorite>true</favorite>
+		<playcount>2</playcount>
+		<lastplayed>20260407T092610</lastplayed>
+	</game>
+	<game>
+		<path>./TestGame.html</path>
+		<name>TestGame</name>
+		<playcount>1</playcount>
+		<lastplayed>20260407T102323</lastplayed>
+	</game>
+	<game>
+		<path>./Astro Arcade.html</path>
+		<name>Astro Arcade</name>
+		<playcount>19</playcount>
+		<lastplayed>20260407T160305</lastplayed>
+	</game>
+	<game>
+		<path>./Hill Climb by Nathan.html</path>
+		<name>Hill Climb by Nathan</name>
+		<playcount>4</playcount>
+		<lastplayed>20260407T160603</lastplayed>
+	</game>
+	<game>
+		<path>./Hill Climb Racing v1.html</path>
+		<name>Hill Climb Racing v1</name>
+		<playcount>4</playcount>
+		<lastplayed>20260407T161031</lastplayed>
+	</game>
+	<game>
+		<path>./Retro Arcade.html</path>
+		<name>Retro Arcade</name>
+		<playcount>1</playcount>
+		<lastplayed>20260407T200655</lastplayed>
+	</game>
+	<game>
+		<path>./Hill Climb Racing.html</path>
+		<name>Hill Climb Racing</name>
+		<playcount>2</playcount>
+		<lastplayed>20260408T111329</lastplayed>
+	</game>
+	<game>
+		<path>./pong.html</path>
+		<name>Pong</name>
+		<playcount>7</playcount>
+		<lastplayed>20260408T111308</lastplayed>
+	</game>
+	<game>
+		<path>./Retro Arcade music by Stephen.html</path>
+		<name>Retro Arcade music by Stephen</name>
+		<playcount>2</playcount>
+		<lastplayed>20260408T111230</lastplayed>
+	</game>
+	<game>
+		<path>./Retro Pong.html</path>
+		<name>Retro Pong</name>
+		<playcount>10</playcount>
+		<lastplayed>20260408T112229</lastplayed>
+	</game>
+	<game>
+		<path>./RetrocadeDash.html</path>
+		<name>RetrocadeDash</name>
+		<favorite>true</favorite>
+		<playcount>14</playcount>
+		<lastplayed>20260408T111256</lastplayed>
+	</game>
+	<game>
+		<path>./Hill Climb Racing Original.html</path>
+		<name>Hill Climb Racing Original</name>
+		<playcount>2</playcount>
+		<lastplayed>20260408T115045</lastplayed>
+	</game>
+</gameList>

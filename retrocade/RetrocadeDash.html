@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retrocade Dash</title>
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #000; }
+        canvas { border: 2px solid #fff; }
+    </style>
+    <script src="./gamepad.js"></script>
+</head>
+<body>
+    <canvas id="gameCanvas" width="480" height="360"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game variables
+        const roadPositions = [-98, -73, -48, -24, 0, 24, 48, 73, 98];
+        const roadYPositions = [110, 70, 30];
+        let gameState = 'title';
+        let score = 0;
+        let highScore = 0;
+        let speed = 3;
+        let tspeed = 1;
+        let playerIndexX = 4;
+        let playerIndexY = 0;
+        let playerX = roadPositions[playerIndexX];
+        let playerY = roadYPositions[playerIndexY];
+        let playerRotation = 0;
+        let playerRotationVel = 0;
+        let stripeOffset = 0;
+        let traffic = [];
+        let spawnIntervalId = null;
+        let passingSpawnIntervalId = null;
+        let speedIntervalId = null;
+        let scoreIntervalId = null;
+        let audioCtx = null;
+        let masterGain = null;
+        let musicSchedulerId = null;
+        let musicStep = 0;
+        let musicNextTime = 0;
+
+        function clamp(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        function getMusicIntensity() {
+            return clamp((speed - 3) / 8, 0, 1);
+        }
+
+        function midiToFreq(midi) {
+            return 440 * Math.pow(2, (midi - 69) / 12);
+        }
+
+        function ensureAudioContext() {
+            if (!audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return;
+                audioCtx = new AudioContextClass();
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = 0.22;
+                masterGain.connect(audioCtx.destination);
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playSynthNote(freq, time, duration, volume, wave) {
+            if (!audioCtx || !masterGain) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = wave;
+            osc.frequency.setValueAtTime(freq, time);
+            gain.gain.setValueAtTime(0.0001, time);
+            gain.gain.exponentialRampToValueAtTime(volume, time + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start(time);
+            osc.stop(time + duration + 0.03);
+        }
+
+        function playKick(time, intensity) {
+            if (!audioCtx || !masterGain) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(120 + intensity * 30, time);
+            osc.frequency.exponentialRampToValueAtTime(45, time + 0.12);
+            gain.gain.setValueAtTime(0.0001, time);
+            gain.gain.exponentialRampToValueAtTime(0.28 + intensity * 0.16, time + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.15);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start(time);
+            osc.stop(time + 0.18);
+        }
+
+        function playCrashSound() {
+            ensureAudioContext();
+            if (!audioCtx || !masterGain) return;
+            const t = audioCtx.currentTime;
+            const impactOsc = audioCtx.createOscillator();
+            const impactGain = audioCtx.createGain();
+            impactOsc.type = 'triangle';
+            impactOsc.frequency.setValueAtTime(180, t);
+            impactOsc.frequency.exponentialRampToValueAtTime(55, t + 0.18);
+            impactGain.gain.setValueAtTime(0.0001, t);
+            impactGain.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
+            impactGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+            impactOsc.connect(impactGain);
+            impactGain.connect(masterGain);
+            impactOsc.start(t);
+            impactOsc.stop(t + 0.24);
+            const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.14), audioCtx.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+            const noiseSource = audioCtx.createBufferSource();
+            const noiseFilter = audioCtx.createBiquadFilter();
+            const noiseGain = audioCtx.createGain();
+            noiseSource.buffer = noiseBuffer;
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.setValueAtTime(1200, t);
+            noiseFilter.Q.value = 0.8;
+            noiseGain.gain.setValueAtTime(0.0001, t);
+            noiseGain.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+            noiseGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+            noiseSource.connect(noiseFilter);
+            noiseFilter.connect(noiseGain);
+            noiseGain.connect(masterGain);
+            noiseSource.start(t);
+            noiseSource.stop(t + 0.14);
+        }
+
+        function scheduleMusic() {
+            if (!audioCtx || gameState !== 'playing') return;
+            const lookAhead = 0.15;
+            while (musicNextTime < audioCtx.currentTime + lookAhead) {
+                const intensity = getMusicIntensity();
+                const tempo = 96 + intensity * 84;
+                const stepDuration = (60 / tempo) / 2;
+                const step = musicStep % 16;
+                const bassPattern = [40,40,43,43,45,45,43,43,40,40,47,47,45,45,43,43];
+                const leadPattern = [64,67,71,67,66,69,73,69,64,67,71,74,66,69,73,76];
+                if (step % 4 === 0) playKick(musicNextTime, intensity);
+                if (intensity > 0.55 && (step % 8 === 6)) playKick(musicNextTime, intensity * 0.8);
+                if (step % 2 === 0) playSynthNote(midiToFreq(bassPattern[step]), musicNextTime, 0.18, 0.08 + intensity * 0.05, 'sawtooth');
+                if (intensity > 0.22) playSynthNote(midiToFreq(leadPattern[step]), musicNextTime, 0.12, 0.035 + intensity * 0.05, 'triangle');
+                if (intensity > 0.75 && step % 2 === 1) playSynthNote(midiToFreq(leadPattern[(step + 4) % 16]), musicNextTime, 0.08, 0.025, 'square');
+                musicStep++;
+                musicNextTime += stepDuration;
+            }
+        }
+
+        function startAdaptiveMusic() {
+            ensureAudioContext();
+            if (!audioCtx) return;
+            musicStep = 0;
+            musicNextTime = audioCtx.currentTime + 0.05;
+            if (musicSchedulerId !== null) clearInterval(musicSchedulerId);
+            musicSchedulerId = setInterval(scheduleMusic, 50);
+        }
+
+        function stopAdaptiveMusic() {
+            if (musicSchedulerId !== null) { clearInterval(musicSchedulerId); musicSchedulerId = null; }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft') movePlayerX(-1);
+            if (e.code === 'ArrowRight') movePlayerX(1);
+            if (e.code === 'ArrowUp') movePlayerY(1);
+            if (e.code === 'ArrowDown') movePlayerY(-1);
+            if (e.code === 'Space' && (gameState === 'title' || gameState === 'crashed')) startGame();
+        });
+
+        // ── Canvas drawing helpers (replaces SVG images) ──────────────────────
+
+        function drawRoad() {
+            // Sky/background
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, 480, 360);
+            // Grass
+            ctx.fillStyle = '#2d5a1b';
+            ctx.fillRect(0, 0, 130, 360);
+            ctx.fillRect(350, 0, 130, 360);
+            // Road
+            ctx.fillStyle = '#333';
+            ctx.fillRect(130, 0, 220, 360);
+            // Yellow edge lines
+            ctx.fillStyle = '#e8c040';
+            ctx.fillRect(128, 0, 4, 360);
+            ctx.fillRect(348, 0, 4, 360);
+        }
+
+        function drawStripes() {
+            ctx.save();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([18, 18]);
+            ctx.lineDashOffset = -stripeOffset;
+            [203.33, 276.67].forEach(x => {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, 360);
+                ctx.stroke();
+            });
+            ctx.restore();
+        }
+
+        function drawCar(cx, cy, rotation, color, headlightsAtBottom) {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(rotation);
+            // Body
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(-10, -15, 20, 30, 3);
+            ctx.fill();
+            // Windshield
+            ctx.fillStyle = '#99ddff';
+            ctx.beginPath();
+            if (headlightsAtBottom) {
+                ctx.roundRect(-6, -11, 12, 8, 1);
+            } else {
+                ctx.roundRect(-6, 3, 12, 8, 1);
+            }
+            ctx.fill();
+            // Wheels
+            ctx.fillStyle = '#111';
+            [[-10,-8],[ 6,-8],[-10, 4],[ 6, 4]].forEach(([wx,wy]) => {
+                ctx.beginPath();
+                ctx.roundRect(wx, wy, 4, 6, 1);
+                ctx.fill();
+            });
+            // Headlights
+            ctx.fillStyle = '#ffee44';
+            if (headlightsAtBottom) {
+                ctx.beginPath(); ctx.roundRect(-7, 9, 4, 4, 1); ctx.fill();
+                ctx.beginPath(); ctx.roundRect(3, 9, 4, 4, 1); ctx.fill();
+            } else {
+                ctx.beginPath(); ctx.roundRect(-7, -14, 4, 4, 1); ctx.fill();
+                ctx.beginPath(); ctx.roundRect(3, -14, 4, 4, 1); ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function drawPlayerCar(cx, cy, rotation) {
+            drawCar(cx, cy, rotation, '#cc2200', true);
+            // RC label
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(rotation);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 7px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('RC', 0, -2);
+            ctx.restore();
+        }
+
+        const trafficColors = ['#1a6abf', '#207a3a', '#7a2090'];
+
+        function drawTrafficCar(cx, cy, rotation, typeIndex) {
+            drawCar(cx, cy, rotation, trafficColors[typeIndex], false);
+        }
+
+        function drawTitleScreen() {
+            // Background
+            ctx.fillStyle = '#0d0d0d';
+            ctx.fillRect(0, 0, 480, 360);
+            // Road hint
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(130, 0, 220, 360);
+            ctx.fillStyle = '#e8c040';
+            ctx.globalAlpha = 0.4;
+            ctx.fillRect(128, 0, 4, 360);
+            ctx.fillRect(348, 0, 4, 360);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#1e3a10';
+            ctx.fillRect(0, 0, 130, 360);
+            ctx.fillRect(350, 0, 130, 360);
+            // Title box
+            ctx.fillStyle = '#111';
+            ctx.beginPath();
+            ctx.roundRect(63, 70, 354, 90, 8);
+            ctx.fill();
+            // Title text
+            ctx.fillStyle = '#e8c040';
+            ctx.font = 'bold 36px "Arial Black", Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('RETROCADE', 240, 122);
+            ctx.fillStyle = '#e8d44d';
+            ctx.font = '400 20px "Arial Black", Arial';
+            ctx.fillText('DASH', 240, 153);
+            // Subtitle
+            ctx.fillStyle = '#ccc';
+            ctx.font = '13px Arial';
+            ctx.fillText('Dodge the traffic. Beat your score.', 240, 200);
+            // Button
+            ctx.fillStyle = '#cc2200';
+            ctx.beginPath();
+            ctx.roundRect(165, 230, 150, 38, 6);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 13px "Arial Black", Arial';
+            ctx.fillText('PRESS START', 240, 255);
+            // Controls hint
+            ctx.fillStyle = '#666';
+            ctx.font = '11px Arial';
+            ctx.fillText('Arrow keys to change lanes', 240, 318);
+        }
+
+        function drawScore() {
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('Score: ' + score, 10, 30);
+            ctx.fillText('Game Record: ' + highScore, 10, 55);
+        }
+
+        function drawCrashedOverlay() {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(120, 20, 240, 105);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('Crashed! Score: ' + score, 130, 50);
+            ctx.fillText('Game Record: ' + highScore, 130, 78);
+            ctx.fillText('Press START to Restart', 130, 106);
+        }
+
+        // ── Game logic (unchanged) ─────────────────────────────────────────────
+
+        function initGame() {
+            stripeOffset = 0;
+            gameLoop();
+        }
+
+        function startGame() {
+            clearActiveIntervals();
+            gameState = 'playing';
+            score = 0;
+            speed = 3;
+            tspeed = 1;
+            playerIndexX = 4;
+            playerIndexY = 0;
+            playerX = roadPositions[playerIndexX];
+            playerY = roadYPositions[playerIndexY];
+            playerRotation = 0;
+            playerRotationVel = 0;
+            traffic = [];
+            spawnIntervalId = setInterval(spawnTraffic, 900);
+            passingSpawnIntervalId = setInterval(spawnPassingTraffic, 1400);
+            speedIntervalId = setInterval(() => { if (gameState === 'playing') { speed += 0.5; tspeed += 0.3; } }, 10000);
+            scoreIntervalId = setInterval(() => { if (gameState === 'playing') score += 1; }, 1000);
+            startAdaptiveMusic();
+        }
+
+        function clearActiveIntervals() {
+            if (spawnIntervalId !== null) { clearInterval(spawnIntervalId); spawnIntervalId = null; }
+            if (passingSpawnIntervalId !== null) { clearInterval(passingSpawnIntervalId); passingSpawnIntervalId = null; }
+            if (speedIntervalId !== null) { clearInterval(speedIntervalId); speedIntervalId = null; }
+            if (scoreIntervalId !== null) { clearInterval(scoreIntervalId); scoreIntervalId = null; }
+            stopAdaptiveMusic();
+        }
+
+        function spawnTraffic() {
+            if (gameState !== 'playing') return;
+            const x = roadPositions[Math.floor(Math.random() * roadPositions.length)];
+            const typeIndex = Math.floor(Math.random() * 3);
+            const forwardSpeed = (speed + tspeed * 0.5) * 1.2;
+            traffic.push({ x, y: -220, typeIndex, dy: forwardSpeed, rotation: 0, rotationVel: 0, isCrashed: false });
+        }
+
+        function spawnPassingTraffic() {
+            if (gameState !== 'playing') return;
+            const x = roadPositions[Math.floor(Math.random() * roadPositions.length)];
+            const typeIndex = Math.floor(Math.random() * 3);
+            const passingSpeed = (speed + tspeed * 0.5) * 0.25;
+            traffic.push({ x, y: 230, typeIndex, dy: -passingSpeed, rotation: 0, rotationVel: 0, isCrashed: false });
+        }
+
+        function movePlayerX(direction) {
+            if (gameState !== 'playing') return;
+            playerIndexX = Math.max(0, Math.min(roadPositions.length - 1, playerIndexX + direction));
+            playerX = roadPositions[playerIndexX];
+        }
+
+        function movePlayerY(direction) {
+            if (gameState !== 'playing') return;
+            playerIndexY = Math.max(0, Math.min(roadYPositions.length - 1, playerIndexY + direction));
+            playerY = roadYPositions[playerIndexY];
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            if (gameState === 'playing') {
+                stripeOffset += speed;
+                if (stripeOffset > 32) stripeOffset -= 32;
+                traffic.forEach(car => { if (!car.isCrashed) car.y += car.dy; });
+                traffic = traffic.filter(car => car.dy > 0 ? car.y < 230 : car.y > -230);
+                traffic.forEach(car => {
+                    if (!car.isCrashed && Math.abs(car.x - playerX) < 10 && Math.abs(car.y - playerY) < 15) {
+                        gameState = 'crashed';
+                        clearActiveIntervals();
+                        playCrashSound();
+                        car.isCrashed = true;
+                        const attackAngle = Math.atan2(car.y - playerY, car.x - playerX);
+                        playerRotationVel = 0.12 * Math.sign(Math.sin(attackAngle));
+                        car.rotationVel = 0.12 * Math.sign(-Math.sin(attackAngle));
+                        const dx = car.x - playerX, dy = car.y - playerY;
+                        const dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist > 0) {
+                            const nx = dx/dist, ny = dy/dist, b = 15;
+                            playerX -= nx*b; playerY -= ny*b;
+                            car.x += nx*b; car.y += ny*b;
+                        }
+                        if (score > highScore) highScore = score;
+                    }
+                });
+            } else if (gameState === 'crashed') {
+                playerRotation += playerRotationVel;
+                playerRotationVel *= 0.95;
+                if (Math.abs(playerRotationVel) < 0.01) playerRotationVel = 0;
+                traffic.forEach(car => {
+                    if (car.isCrashed) {
+                        car.rotation += car.rotationVel;
+                        car.rotationVel *= 0.95;
+                        if (Math.abs(car.rotationVel) < 0.01) car.rotationVel = 0;
+                    }
+                });
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (gameState === 'title') {
+                drawTitleScreen();
+            } else {
+                drawRoad();
+                drawStripes();
+                // Player
+                drawPlayerCar(playerX + 240, playerY + 180, playerRotation);
+                // Traffic
+                traffic.forEach(car => drawTrafficCar(car.x + 240, car.y + 180, car.rotation || 0, car.typeIndex));
+                drawScore();
+                if (gameState === 'crashed') drawCrashedOverlay();
+            }
+        }
+
+        initGame();
+    </script>
+</body>
+</html>

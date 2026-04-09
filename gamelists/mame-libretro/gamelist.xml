@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<gameList>
+	<game>
+		<path>./offroadc.zip</path>
+		<name>Off Road Challenge (v1.63)</name>
+		<playcount>3</playcount>
+		<lastplayed>20260407T163134</lastplayed>
+	</game>
+	<game>
+		<path>./chasehqu.zip</path>
+		<name>Chase H.Q. (US)</name>
+		<playcount>3</playcount>
+		<lastplayed>20260407T194652</lastplayed>
+	</game>
+	<game>
+		<path>./nrallyx.zip</path>
+		<name>New Rally X</name>
+		<playcount>4</playcount>
+		<lastplayed>20260407T194720</lastplayed>
+	</game>
+	<game>
+		<path>./outrunb.zip</path>
+		<name>Out Run (bootleg)</name>
+		<playcount>3</playcount>
+		<lastplayed>20260407T194729</lastplayed>
+	</game>
+	<game>
+		<path>./mk2.zip</path>
+		<name>Mortal Kombat II (rev L3.1)</name>
+		<playcount>3</playcount>
+		<lastplayed>20260407T212610</lastplayed>
+	</game>
+</gameList>

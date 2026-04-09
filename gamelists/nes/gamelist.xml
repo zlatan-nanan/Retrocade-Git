@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<gameList>
+	<game>
+		<path>./Super Chase H.Q..7z</path>
+		<name>Super Chase H.Q.</name>
+		<playcount>1</playcount>
+		<lastplayed>20260407T161636</lastplayed>
+	</game>
+	<game>
+		<path>./Project_DART_V1.0.nes</path>
+		<name>Project_DART_V1.0</name>
+		<playcount>5</playcount>
+		<lastplayed>20260407T193943</lastplayed>
+	</game>
+	<game>
+		<path>./Tetris (USA).zip</path>
+		<name>Tetris (USA)</name>
+		<playcount>13</playcount>
+		<lastplayed>20260407T194633</lastplayed>
+	</game>
+	<game>
+		<path>./Super Mario Bros. (World).nes</path>
+		<name>Super Mario Bros. (World)</name>
+		<playcount>19</playcount>
+		<lastplayed>20260407T201241</lastplayed>
+	</game>
+	<game>
+		<path>./Tetris (USA).nes</path>
+		<name>Tetris (USA)</name>
+		<playcount>3</playcount>
+		<lastplayed>20260408T111102</lastplayed>
+	</game>
+</gameList>

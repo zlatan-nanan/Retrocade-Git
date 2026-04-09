@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<gameList>
+	<game>
+		<path>./Scratch.sh</path>
+		<name>Scratch</name>
+		<playcount>2</playcount>
+		<lastplayed>20260211T124558</lastplayed>
+	</game>
+	<game>
+		<path>./Retro Racing.html</path>
+		<name>Retro Racing</name>
+		<playcount>10</playcount>
+		<lastplayed>20260211T140456</lastplayed>
+	</game>
+	<game>
+		<path>./RetroRacing.html</path>
+		<name>RetroRacing</name>
+		<playcount>4</playcount>
+		<lastplayed>20260211T143012</lastplayed>
+	</game>
+	<game>
+		<path>./Retro_Racing.html</path>
+		<name>Retro_Racing</name>
+		<playcount>12</playcount>
+		<lastplayed>20260211T222857</lastplayed>
+	</game>
+</gameList>
