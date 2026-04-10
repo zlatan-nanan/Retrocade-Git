@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  	<script src="./gamepad.js"></script> // Controller Script. This script listens for gamepad input and translates it into keyboard events for the games to receive.
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RETROCADE — Owner's Manual</title>
@@ -661,7 +663,7 @@
       <ol class="steps">
         <li><span>Open the exported <code>.html</code> file in a text editor (TextEdit on Mac in plain text mode, Notepad on Windows, or VS Code).</span></li>
         <li><span>Find the opening <code>&lt;head&gt;</code> tag near the top of the file.</span></li>
-        <li><span>Paste the Retrocade controller script immediately after the <code>&lt;head&gt;</code> tag. Your teacher or the Nanan Academy team can provide the current version of this script.</span></li>
+        <li><span>Paste the Retrocade controller script immediately after the <code>&lt;head&gt;</code> tag: <code>&lt;script src="./gamepad.js"&gt;&lt;/script&gt;</code></span></li>
         <li><span>Save the file. The game is now ready to be added to the Retrocade folder.</span></li>
       </ol>
 
@@ -858,6 +860,165 @@
   }, { threshold: 0.3 });
 
   sections.forEach(s => observer.observe(s));
+
+  // Allow the shared gamepad arrow events to drive page scrolling.
+  const scrollState = {
+    up: false,
+    down: false,
+    frameId: null,
+    speed: 14
+  };
+
+  function isEditableTarget(target) {
+    return target instanceof HTMLElement && (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable
+    );
+  }
+
+  function updateGuideScroll() {
+    const direction = (scrollState.down ? 1 : 0) - (scrollState.up ? 1 : 0);
+
+    if (direction !== 0) {
+      window.scrollBy(0, direction * scrollState.speed);
+      scrollState.frameId = requestAnimationFrame(updateGuideScroll);
+      return;
+    }
+
+    scrollState.frameId = null;
+  }
+
+  function ensureGuideScrollLoop() {
+    if (scrollState.frameId === null) {
+      scrollState.frameId = requestAnimationFrame(updateGuideScroll);
+    }
+  }
+
+  document.addEventListener('keydown', event => {
+    if (!event.isTrusted) return; // ignore synthetic events from gamepad.js — direct poll handles joystick
+    if (isEditableTarget(event.target)) return;
+
+    if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+      event.preventDefault();
+      scrollState.up = event.code === 'ArrowUp';
+      scrollState.down = event.code === 'ArrowDown';
+      ensureGuideScrollLoop();
+    }
+  });
+
+  document.addEventListener('keyup', event => {
+    if (event.code === 'ArrowUp') scrollState.up = false;
+    if (event.code === 'ArrowDown') scrollState.down = false;
+  });
+
+  window.addEventListener('blur', () => {
+    scrollState.up = false;
+    scrollState.down = false;
+  });
+
+  // Switch tabs with left/right joystick on the tab group most visible in the viewport.
+  function getMostVisibleTabGroup() {
+    const groups = Array.from(document.querySelectorAll('.method-tabs'));
+    let best = null;
+    let bestRatio = 0;
+
+    for (const group of groups) {
+      const rect = group.getBoundingClientRect();
+      const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+      const ratio = visibleHeight / rect.height;
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        best = group;
+      }
+    }
+
+    return bestRatio > 0.1 ? best : null;
+  }
+
+  function shiftTab(direction) {
+    const group = getMostVisibleTabGroup();
+    if (!group) return;
+
+    const buttons = Array.from(group.querySelectorAll('.tab-btn'));
+    const activeIndex = buttons.findIndex(b => b.classList.contains('active'));
+    const nextIndex = (activeIndex + direction + buttons.length) % buttons.length;
+
+    buttons[nextIndex].click();
+  }
+
+  document.addEventListener('keydown', event => {
+    if (!event.isTrusted) return; // ignore synthetic events from gamepad.js
+    if (isEditableTarget(event.target)) return;
+
+    if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+      const group = getMostVisibleTabGroup();
+      if (group) {
+        event.preventDefault();
+        shiftTab(event.code === 'ArrowRight' ? 1 : -1);
+      }
+    }
+  });
+
+  // ── Direct Gamepad Polling ───────────────────────────────────────────────
+  // Polls the Gamepad API directly every frame so joystick scroll and tab
+  // switching work without needing a button press to activate the API first.
+  // Real keyboard input is handled by the isTrusted keydown listeners above.
+  (function () {
+    const GP_THRESHOLD = 0.5;
+    const GP_SPEED = 14;
+    let gpScrollDir = 0;
+    let gpScrollRaf = null;
+    let gpPrevHoriz = 'none';
+
+    function gpScrollLoop() {
+      if (gpScrollDir !== 0) {
+        window.scrollBy(0, gpScrollDir * GP_SPEED);
+        gpScrollRaf = requestAnimationFrame(gpScrollLoop);
+      } else {
+        gpScrollRaf = null;
+      }
+    }
+
+    function gpPoll() {
+      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      let newDir = 0;
+      let newHoriz = 'none';
+
+      for (const gp of gamepads) {
+        if (!gp) continue;
+
+        // Vertical scroll — left stick Y (axis 1), D-pad up/down (buttons 12/13)
+        const vert = gp.axes[1] || 0;
+        const dU = gp.buttons[12] && gp.buttons[12].pressed;
+        const dD = gp.buttons[13] && gp.buttons[13].pressed;
+        if (vert < -GP_THRESHOLD || dU) newDir = -1;
+        else if (vert > GP_THRESHOLD || dD) newDir = 1;
+
+        // Horizontal tab switch — left stick X (axis 0), D-pad left/right (14/15)
+        const horiz = gp.axes[0] || 0;
+        const dL = gp.buttons[14] && gp.buttons[14].pressed;
+        const dR = gp.buttons[15] && gp.buttons[15].pressed;
+        if (horiz < -GP_THRESHOLD || dL) newHoriz = 'left';
+        else if (horiz > GP_THRESHOLD || dR) newHoriz = 'right';
+      }
+
+      gpScrollDir = newDir;
+      if (gpScrollDir !== 0 && gpScrollRaf === null) {
+        gpScrollRaf = requestAnimationFrame(gpScrollLoop);
+      }
+
+      if (newHoriz !== gpPrevHoriz) {
+        if (newHoriz === 'left') shiftTab(-1);
+        if (newHoriz === 'right') shiftTab(1);
+        gpPrevHoriz = newHoriz;
+      }
+
+      requestAnimationFrame(gpPoll);
+    }
+
+    requestAnimationFrame(gpPoll);
+  })();
 </script>
 
 </body>
