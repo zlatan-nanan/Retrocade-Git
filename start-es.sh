@@ -4,7 +4,8 @@ source /home/nanan/.profile 2>/dev/null
 source /home/nanan/.bashrc 2>/dev/null
 sleep 5
 
-# Disable screensaver and display power management
+# Kill xscreensaver and disable screensaver/DPMS
+killall xscreensaver 2>/dev/null
 DISPLAY=:0 xset s off
 DISPLAY=:0 xset -dpms
 DISPLAY=:0 xset s noblank
