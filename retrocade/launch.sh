@@ -42,8 +42,8 @@ p = pathlib.Path(sys.argv[1]).resolve()
 print("file://" + quote(str(p), safe="/"))
 PY
 )"
-export DISPLAY=${DISPLAY:-:0}
-export XAUTHORITY=${XAUTHORITY:-$HOME/.Xauthority}
+export DISPLAY=:0
+export XAUTHORITY=/home/nanan/.Xauthority
 ES_HEX="0x02a0000b"
 
 if command -v chromium-browser >/dev/null 2>&1; then
